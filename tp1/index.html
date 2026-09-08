@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tic Tac Toe Screen Blocker</title>
+  <style>
+    :root {
+      --bg: #7e1e9c;
+      --panel: #35063e;
+      --line: rgba(255, 255, 255, 0.85);
+      --cell-gap: clamp(4px, 0.9vmin, 10px);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      min-height: 100%;
+      overflow: hidden;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    body {
+      color: white;
+      background-color: #7e1e9c;
+    }
+
+    #overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+      padding: 1rem;
+      background: radial-gradient(circle at top, rgba(255,255,255,0.08), transparent 38%), var(--bg);
+    }
+
+    #status {
+      text-align: center;
+      font-size: clamp(1rem, 2.5vmin, 1.8rem);
+      font-weight: 700;
+      min-height: 1.5em;
+    }
+
+    #score {
+      text-align: center;
+      font-size: clamp(0.95rem, 2vmin, 1.35rem);
+      opacity: 0.95;
+    }
+
+    #board {
+      width: min(92vmin, 92vw);
+      height: min(92vmin, 92vw);
+      max-width: 96vw;
+      max-height: 96vh;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: repeat(3, 1fr);
+      gap: var(--cell-gap);
+      padding: var(--cell-gap);
+      border: 4px solid rgba(255, 255, 255, 0.9);
+      border-radius: 18px;
+      background: rgba(0, 0, 0, 0.08);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+      touch-action: manipulation;
+    }
+
+    .cell {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 3px solid var(--line);
+      border-radius: 14px;
+      background: rgba(53, 6, 62, 0.22);
+      color: white;
+      font-size: clamp(4rem, 18vmin, 11rem);
+      font-weight: 900;
+      line-height: 1;
+      cursor: pointer;
+      user-select: none;
+      transition: transform 120ms ease, background-color 120ms ease;
+    }
+
+    .cell:hover {
+      transform: scale(0.99);
+      background: rgba(53, 6, 62, 0.34);
+    }
+
+    .cell.disabled {
+      cursor: default;
+    }
+
+    .cell.x {
+      color: #ffd166;
+      text-shadow: 0 2px 0 rgba(0, 0, 0, 0.18);
+    }
+
+    .cell.o {
+      color: #ffffff;
+      text-shadow: 0 2px 0 rgba(0, 0, 0, 0.18);
+    }
+
+    #config-bar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.75rem;
+      padding: 0.65rem 1rem;
+      background: rgba(53, 6, 62, 0.72);
+      backdrop-filter: blur(6px);
+      font-size: 0.95rem;
+    }
+
+    .boton {
+      color: white;
+      background-color: #35063e;
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      border-radius: 8px;
+      padding: 0.45rem 0.65rem;
+      width: 8rem;
+      font-size: 1rem;
+      outline: none;
+    }
+
+    .boton::placeholder {
+      color: rgba(255, 255, 255, 0.7);
+    }
+
+    #timer-display {
+      min-width: 11rem;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #status-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.25rem;
+    }
+  </style>
+</head>
+<body style="color: white; background-color: #7e1e9c;">
+  <div id="overlay" aria-live="polite">
+    <div id="status-wrap">
+      <div id="status">Loading...</div>
+      <div id="score">Losses: 0</div>
+    </div>
+    <div id="board" aria-label="Tic tac toe board"></div>
+  </div>
+
+  <div id="config-bar">
+    <label for="interval-input">Re-block interval (minutes):</label>
+    <input id="interval-input" class="boton" type="number" min="1" step="1" value="2" placeholder="2" />
+    <div id="timer-display">Re-block in: 2:00</div>
+  </div>
+
+  <script>
+    const boardEl = document.getElementById('board');
+    const statusEl = document.getElementById('status');
+    const scoreEl = document.getElementById('score');
+    const timerDisplayEl = document.getElementById('timer-display');
+    const intervalInput = document.getElementById('interval-input');
+
+    const WIN_LINES = [
+      [0, 1, 2], [3, 4, 5], [6, 7, 8],
+      [0, 3, 6], [1, 4, 7], [2, 5, 8],
+      [0, 4, 8], [2, 4, 6]
+    ];
+
+    let board = Array(9).fill('');
+    let gameActive = true;
+    let blocked = true;
+    let lossCount = 0;
+    let intervalMinutes = 2;
+    let reblockTimeout = null;
+    let countdownTimer = null;
+    let reblockDeadline = null;
+
+    function createBoard() {
+      boardEl.innerHTML = '';
+      for (let i = 0; i < 9; i++) {
+        const cell = document.createElement('div');
+        cell.className = 'cell disabled';
+        cell.setAttribute('role', 'button');
+        cell.setAttribute('aria-label', `Cell ${i + 1}`);
+        cell.dataset.index = String(i);
+        cell.addEventListener('click', handleCellClick);
+        boardEl.appendChild(cell);
+      }
+    }
+
+    function renderBoard() {
+      const cells = boardEl.querySelectorAll('.cell');
+      cells.forEach((cell, index) => {
+        const value = board[index];
+        cell.textContent = value;
+        cell.classList.toggle('x', value === 'X');
+        cell.classList.toggle('o', value === 'O');
+        cell.classList.toggle('disabled', !blocked || !gameActive);
+        cell.style.pointerEvents = blocked && gameActive ? 'auto' : 'none';
+      });
+    }
+
+    function updateScore() {
+      scoreEl.textContent = `Losses: ${lossCount}`;
+    }
+
+    function checkWinner(state) {
+      for (const [a, b, c] of WIN_LINES) {
+        if (state[a] && state[a] === state[b] && state[a] === state[c]) {
+          return state[a];
+        }
+      }
+      return state.every(Boolean) ? 'draw' : null;
+    }
+
+    function emptyIndices(state) {
+      const moves = [];
+      for (let i = 0; i < state.length; i++) {
+        if (!state[i]) moves.push(i);
+      }
+      return moves;
+    }
+
+    function minimax(state, isMaximizing) {
+      const result = checkWinner(state);
+      if (result === 'X') return 10;
+      if (result === 'O') return -10;
+      if (result === 'draw') return 0;
+
+      if (isMaximizing) {
+        let bestScore = -Infinity;
+        for (const move of emptyIndices(state)) {
+          state[move] = 'X';
+          const score = minimax(state, false);
+          state[move] = '';
+          bestScore = Math.max(bestScore, score);
+        }
+        return bestScore;
+      }
+
+      let bestScore = Infinity;
+      for (const move of emptyIndices(state)) {
+        state[move] = 'O';
+        const score = minimax(state, true);
+        state[move] = '';
+        bestScore = Math.min(bestScore, score);
+      }
+      return bestScore;
+    }
+
+    function getBestMove() {
+      const moves = emptyIndices(board);
+      let bestScore = -Infinity;
+      let bestMove = moves[0];
+
+      for (const move of moves) {
+        board[move] = 'X';
+        const score = minimax(board, false);
+        board[move] = '';
+        if (score > bestScore) {
+          bestScore = score;
+          bestMove = move;
+        }
+      }
+
+      return bestMove;
+    }
+
+    function getRandomMove() {
+      const moves = emptyIndices(board);
+      return moves[Math.floor(Math.random() * moves.length)];
+    }
+
+    function pickAiMove() {
+      return Math.random() < 0.3 ? getRandomMove() : getBestMove();
+    }
+
+    function setStatus(message) {
+      statusEl.textContent = message;
+    }
+
+    function stopTimers() {
+      if (reblockTimeout) {
+        clearTimeout(reblockTimeout);
+        reblockTimeout = null;
+      }
+      if (countdownTimer) {
+        clearInterval(countdownTimer);
+        countdownTimer = null;
+      }
+      reblockDeadline = null;
+    }
+
+    function updateTimerDisplay() {
+      if (!reblockDeadline) {
+        timerDisplayEl.textContent = blocked
+          ? 'Re-block in: —'
+          : `Re-block in: ${Math.round(intervalMinutes * 60)}s`;
+        return;
+      }
+      const secondsLeft = Math.max(0, Math.ceil((reblockDeadline - Date.now()) / 1000));
+      timerDisplayEl.textContent = `Re-block in: ${secondsLeft}s`;
+    }
+
+    function startReblockTimer() {
+      stopTimers();
+      reblockDeadline = Date.now() + intervalMinutes * 60000;
+      updateTimerDisplay();
+      countdownTimer = setInterval(updateTimerDisplay, 1000);
+      reblockTimeout = setTimeout(() => {
+        blockScreen();
+      }, intervalMinutes * 60000);
+    }
+
+    function unblockScreen(message) {
+      blocked = false;
+      gameActive = false;
+      document.body.style.backgroundColor = '#ffff84';
+      document.getElementById('overlay').style.display = 'none';
+      setStatus(message || 'Screen unblocked. Re-block timer started.');
+      boardEl.querySelectorAll('.cell').forEach((cell) => {
+        cell.style.pointerEvents = 'none';
+      });
+      startReblockTimer();
+    }
+
+    function blockScreen() {
+      stopTimers();
+      blocked = true;
+      gameActive = true;
+      document.body.style.backgroundColor = '#7e1e9c';
+      document.getElementById('overlay').style.display = 'flex';
+      lossCount = 0;
+      board = Array(9).fill('');
+      setStatus('Screen blocked. Your turn.');
+      updateScore();
+      renderBoard();
+      updateTimerDisplay();
+      boardEl.querySelectorAll('.cell').forEach((cell) => {
+        cell.style.pointerEvents = 'auto';
+      });
+    }
+
+    function resetRound(message) {
+      board = Array(9).fill('');
+      gameActive = true;
+      setStatus(message || 'New round. Your turn.');
+      renderBoard();
+    }
+
+    function handleResult(result) {
+      if (result === 'O') {
+        unblockScreen('You win. Screen unblocked.');
+        return;
+      }
+
+      if (result === 'X') {
+        lossCount += 1;
+        updateScore();
+        if (lossCount > 5) {
+          unblockScreen('You lost more than 5 games. Screen unblocked.');
+        } else {
+          gameActive = false;
+          setStatus(`You lost. Starting new game... (${lossCount}/5 losses)`);
+          setTimeout(() => {
+            if (blocked) {
+              resetRound('Try again. Your turn.');
+            }
+          }, 1400);
+        }
+        return;
+      }
+
+      if (result === 'draw') {
+        setStatus('Draw. Starting a new game...');
+        setTimeout(() => {
+          if (blocked) {
+            resetRound('Your turn.');
+          }
+        }, 900);
+      }
+    }
+
+    function handleCellClick(event) {
+      if (!blocked || !gameActive) return;
+      const index = Number(event.currentTarget.dataset.index);
+      if (board[index]) return;
+
+      board[index] = 'O';
+      renderBoard();
+
+      const playerResult = checkWinner(board);
+      if (playerResult) {
+        handleResult(playerResult);
+        return;
+      }
+
+      // Lock board while AI thinks
+      gameActive = false;
+      setStatus('Application is thinking...');
+      renderBoard();
+
+      setTimeout(() => {
+        if (!blocked) return;
+
+        const move = pickAiMove();
+        if (move !== undefined) {
+          board[move] = 'X';
+        }
+
+        const aiResult = checkWinner(board);
+        if (aiResult) {
+          // Keep board locked; handleResult will decide what happens next
+          renderBoard();
+          handleResult(aiResult);
+        } else {
+          // Restore turn to player
+          gameActive = true;
+          renderBoard();
+          setStatus('Your turn.');
+        }
+      }, 350);
+    }
+
+    function applyIntervalFromInput() {
+      const value = Number.parseInt(intervalInput.value, 10);
+      if (Number.isFinite(value) && value >= 1) {
+        intervalMinutes = value;
+        if (!blocked && reblockTimeout) {
+          startReblockTimer();
+        } else if (!blocked) {
+          updateTimerDisplay();
+        }
+      } else {
+        intervalInput.value = String(intervalMinutes);
+      }
+    }
+
+    function setupInput() {
+      intervalInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          applyIntervalFromInput();
+          intervalInput.blur();
+        }
+      });
+
+      intervalInput.addEventListener('change', applyIntervalFromInput);
+    }
+
+    function init() {
+      createBoard();
+      setupInput();
+      updateScore();
+      intervalInput.value = '2';
+      intervalMinutes = 2;
+      blockScreen();
+      renderBoard();
+      updateTimerDisplay();
+    }
+
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>
